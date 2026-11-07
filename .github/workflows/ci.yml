@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Go ${{ matrix.go }} · 全量校验
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.21', '1.22', '1.23']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: 代码格式
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+      - name: 静态检查
+        run: go vet ./...
+
+      - name: 全量单元测试
+        run: go test ./... -count=1 -race
+
+      - name: 构建
+        run: go build ./...
+
+      - name: 代数律门禁（交换 / 结合 / 幂等）
+        run: go run ./cmd/confluxlab laws -rounds 300
+
+      - name: 收敛性门禁（5 副本 · 500 事件 · 分区与重复投递）
+        run: go run ./cmd/confluxlab verify -rounds 500 -replicas 5
+
+      - name: 确定性回放校验
+        run: |
+          go run ./cmd/confluxlab verify -rounds 200 -json > /tmp/run-a.json
+          go run ./cmd/confluxlab verify -rounds 200 -json > /tmp/run-b.json
+          diff /tmp/run-a.json /tmp/run-b.json
+          echo "同种子两次运行逐位一致"
+
+      - name: 仓库内不得出现硬编码凭据
+        run: |
+          if grep -rInE 'gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}' \
+              --include='*.go' --include='*.md' --include='*.yml' --include='*.yaml' --include='*.sh' .; then
+            echo "检测到疑似凭据，请立即轮换并清理"; exit 1
+          fi
+          echo "无硬编码凭据"
+
+  cross-build:
+    name: 全平台静态构建
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: 交叉编译 5 个目标
+        run: bash scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: confluxlab-binaries
+          path: dist/

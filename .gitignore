@@ -1,0 +1,20 @@
+# 构建产物
+/dist/
+/confluxlab
+*.exe
+*.test
+coverage.out
+coverage.html
+
+# 本地环境
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Go 工作区
+go.work
+go.work.sum
